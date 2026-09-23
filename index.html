@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Vitri · Google Drive</title>
+  <style>
+    :root { --bg: #f3f3f1; --card: #fff; --text: #1f2120; --muted: #6c706d; --accent: #303331; --danger: #c93434; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #161817; --card: #1f2221; --text: #ecedea; --muted: #9a9e9b; --accent: #f1f1ee; --danger: #ff7a7a; }
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+    .card { background: var(--card); border-radius: 14px; padding: 28px; max-width: 420px; width: 100%; text-align: center;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, .12); }
+    .logo { width: 56px; height: 56px; border-radius: 14px; }
+    h1 { font-size: 20px; margin: 14px 0 6px; }
+    p { color: var(--muted); margin: 0 0 20px; }
+    button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 20px; cursor: pointer;
+      background: var(--accent); color: var(--bg); display: inline-flex; align-items: center; gap: 10px; }
+    button:disabled { opacity: .5; cursor: default; }
+    button svg { width: 20px; height: 20px; fill: currentColor; }
+    .error { color: var(--danger); margin-top: 16px; }
+    .small { font-size: 13px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <svg class="logo" viewBox="0 0 1254 1254" aria-hidden="true"><rect width="1254" height="1254" rx="220" fill="#303331"/><g fill="#fff"><path d="M183 233H395C425 233 450 252 463 278L606 565 465 815 170 255C165 245 172 233 183 233Z"/><path d="M858 233H1071C1082 233 1089 245 1084 255L778 818 643 565 790 278C803 252 828 233 858 233Z"/><path d="M624 597 762 852 680 1000C665 1027 645 1048 620 1048 595 1048 575 1027 565 1003L482 850Z"/></g></svg>
+  <h1>Importar desde Google Drive</h1>
+  <p id="msg">Elige las fotos y vídeos que quieras llevar a la pantalla.</p>
+  <button id="pickBtn" disabled>
+    <svg viewBox="200 130 810 720" aria-hidden="true"><path d="M446 203 570 415 335 830 215 617Z"/><path d="M480 148H720L970 579H730Z"/><path d="M520 616H990L865 831H397Z"/></svg>
+    Abrir Google Drive
+  </button>
+  <div id="error" class="error small" hidden></div>
+</div>
+
+<script>
+'use strict';
+
+/* ================= CONFIGURACIÓN (rellenar una vez, ver README.md) ================= */
+const CONFIG = {
+  CLIENT_ID: 'PEGA_AQUI_EL_ID_DE_CLIENTE.apps.googleusercontent.com',
+  API_KEY: 'PEGA_AQUI_LA_CLAVE_DE_API',
+  APP_ID: 'PEGA_AQUI_EL_NUMERO_DE_PROYECTO',
+};
+/* ================================================================================== */
+
+// Solo archivos que Vitri puede reproducir.
+const MIME_TYPES = 'image/jpeg,image/png,video/mp4,video/quicktime';
+const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const target = params.get('origin') || '';
+
+/**
+ * El token solo se entrega al panel de Vitri en la red local: http(s) a una IP privada o localhost.
+ * Así un enlace malicioso con otro "origin" no puede llevarse el permiso.
+ */
+function isLocalOrigin(origin) {
+  let u;
+  try { u = new URL(origin); } catch (e) { return false; }
+  if (u.origin !== origin || !/^https?:$/.test(u.protocol)) return false;
+  const h = u.hostname;
+  if (h === 'localhost' || h === '127.0.0.1') return true;
+  const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+}
+
+function fail(text) {
+  $('error').textContent = text;
+  $('error').hidden = false;
+}
+
+/** Devuelve el resultado al panel: por postMessage si sigue abierto, o redirigiendo si no. */
+function deliver(payload) {
+  if (window.opener && !window.opener.closed) {
+    window.opener.postMessage(payload, target);
+    window.close();
+    return;
+  }
+  location.replace(target + '/#drive-import=' + encodeURIComponent(JSON.stringify(payload)));
+}
+
+let accessToken = null;
+let tokenClient = null;
+let pickerReady = false;
+
+function updateButton() {
+  $('pickBtn').disabled = !(tokenClient && pickerReady);
+}
+
+function showPicker() {
+  const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+    .setMimeTypes(MIME_TYPES).setIncludeFolders(true).setSelectFolderEnabled(false).setMode(google.picker.DocsViewMode.GRID);
+  const shared = new google.picker.DocsView(google.picker.ViewId.DOCS)
+    .setMimeTypes(MIME_TYPES).setOwnedByMe(false).setMode(google.picker.DocsViewMode.GRID);
+  const drives = new google.picker.DocsView(google.picker.ViewId.DOCS)
+    .setMimeTypes(MIME_TYPES).setEnableDrives(true).setIncludeFolders(true).setSelectFolderEnabled(false);
+  const picker = new google.picker.PickerBuilder()
+    .setAppId(CONFIG.APP_ID)
+    .setDeveloperKey(CONFIG.API_KEY)
+    .setOAuthToken(accessToken)
+    .setLocale('es')
+    .setTitle('Elige fotos y vídeos para Vitri')
+    .addView(view)
+    .addView(shared)
+    .addView(drives)
+    .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+    .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
+    .setSize(Math.min(1051, window.innerWidth - 20), Math.min(650, window.innerHeight - 20))
+    .setCallback(onPicked)
+    .build();
+  picker.setVisible(true);
+}
+
+function onPicked(data) {
+  const action = data[google.picker.Response.ACTION];
+  if (action === google.picker.Action.CANCEL) {
+    deliver({ type: 'vitri-drive', cancelled: true });
+  } else if (action === google.picker.Action.PICKED) {
+    const files = data[google.picker.Response.DOCUMENTS].map(d => ({
+      id: d[google.picker.Document.ID],
+      name: d[google.picker.Document.NAME],
+      mimeType: d[google.picker.Document.MIME_TYPE],
+      sizeBytes: d.sizeBytes,
+    }));
+    deliver({ type: 'vitri-drive', token: accessToken, files });
+  }
+}
+
+$('pickBtn').addEventListener('click', () => {
+  if (accessToken) { showPicker(); return; }
+  tokenClient.requestAccessToken({ prompt: '' });
+});
+
+function onGisLoaded() {
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.CLIENT_ID,
+    scope: SCOPE,
+    callback: resp => {
+      if (resp.error) { fail('No se ha podido iniciar sesión en Google (' + resp.error + ').'); return; }
+      accessToken = resp.access_token;
+      showPicker();
+    },
+    error_callback: err => {
+      if (err && err.type === 'popup_closed') return;
+      fail('No se ha podido abrir el inicio de sesión de Google. Permite las ventanas emergentes para esta página.');
+    },
+  });
+  updateButton();
+}
+
+function onGapiLoaded() {
+  gapi.load('picker', () => { pickerReady = true; updateButton(); });
+}
+
+if (!isLocalOrigin(target)) {
+  $('msg').textContent = 'Abre esta página desde el botón «Drive» del panel de Vitri.';
+  $('pickBtn').hidden = true;
+} else if (CONFIG.CLIENT_ID.startsWith('PEGA_AQUI')) {
+  fail('Falta configurar esta página: rellena CLIENT_ID, API_KEY y APP_ID (ver README.md).');
+} else {
+  for (const [src, onload] of [['https://accounts.google.com/gsi/client', onGisLoaded], ['https://apis.google.com/js/api.js', onGapiLoaded]]) {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = onload;
+    s.onerror = () => fail('No se han podido cargar los servicios de Google. Comprueba la conexión.');
+    document.head.append(s);
+  }
+}
+</script>
+</body>
+</html>
