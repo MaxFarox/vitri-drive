@@ -90,6 +90,81 @@ const targetPath = params.get('path') || '';
 // En el móvil el panel abre esta página en la misma pestaña: al terminar se vuelve redirigiendo.
 const redirectMode = params.get('mode') === 'redirect';
 
+/* Idioma: el del panel de Vitri (?lang=es|ca|en). El castellano es la base. */
+const LANG = ['es', 'ca', 'en'].includes(params.get('lang')) ? params.get('lang') : 'es';
+const STRINGS = {
+  ca: {
+    'Importar desde Google Drive': 'Importa des de Google Drive',
+    'Elige las fotos y vídeos que quieras llevar a la pantalla.': 'Tria les fotos i els vídeos que vulguis portar a la pantalla.',
+    'Abrir Google Drive': 'Obre Google Drive',
+    'Cancelar': 'Cancel·la',
+    'Añadir más de Drive': 'Afegeix-ne més de Drive',
+    'Ya puedes cerrar esta ventana: la pantalla se está descargando los archivos.': 'Ja pots tancar aquesta finestra: la pantalla està descarregant els fitxers.',
+    'Volver a Vitri': 'Torna a Vitri',
+    'Cancelado': 'Cancel·lat',
+    'Enviado a Vitri': 'Enviat a Vitri',
+    'No se ha importado nada.': 'No s\'ha importat res.',
+    '✓ {n} archivo enviado': '✓ {n} fitxer enviat',
+    '✓ {n} archivos enviados': '✓ {n} fitxers enviats',
+    'Vídeo': 'Vídeo',
+    'Foto': 'Foto',
+    'Quitar {name}': 'Treu {name}',
+    'Enviar {n} archivo a Vitri': 'Envia {n} fitxer a Vitri',
+    'Enviar {n} archivos a Vitri': 'Envia {n} fitxers a Vitri',
+    'Enviar a Vitri': 'Envia a Vitri',
+    'Listo para enviar': 'Tot a punt per enviar',
+    'Puedes volver a Drive para añadir más antes de enviar.': 'Pots tornar a Drive per afegir-ne més abans d\'enviar.',
+    'Elige fotos y vídeos para Vitri': 'Tria fotos i vídeos per a Vitri',
+    'No se ha podido iniciar sesión en Google ({err}).': 'No s\'ha pogut iniciar la sessió a Google ({err}).',
+    'No se ha podido abrir el inicio de sesión de Google. Permite las ventanas emergentes para esta página.': 'No s\'ha pogut obrir l\'inici de sessió de Google. Permet les finestres emergents per a aquesta pàgina.',
+    'Abre esta página desde el botón «Drive» del panel de Vitri.': 'Obre aquesta pàgina des del botó «Drive» del panell de Vitri.',
+    'Falta configurar esta página: crea config.js con CLIENT_ID, API_KEY y APP_ID (ver README.md).': 'Falta configurar aquesta pàgina: crea config.js amb CLIENT_ID, API_KEY i APP_ID (vegeu README.md).',
+    'No se han podido cargar los servicios de Google. Comprueba la conexión.': 'No s\'han pogut carregar els serveis de Google. Comprova la connexió.',
+  },
+  en: {
+    'Importar desde Google Drive': 'Import from Google Drive',
+    'Elige las fotos y vídeos que quieras llevar a la pantalla.': 'Choose the photos and videos you want on the screen.',
+    'Abrir Google Drive': 'Open Google Drive',
+    'Cancelar': 'Cancel',
+    'Añadir más de Drive': 'Add more from Drive',
+    'Ya puedes cerrar esta ventana: la pantalla se está descargando los archivos.': 'You can close this window now: the screen is downloading the files.',
+    'Volver a Vitri': 'Back to Vitri',
+    'Cancelado': 'Cancelled',
+    'Enviado a Vitri': 'Sent to Vitri',
+    'No se ha importado nada.': 'Nothing was imported.',
+    '✓ {n} archivo enviado': '✓ {n} file sent',
+    '✓ {n} archivos enviados': '✓ {n} files sent',
+    'Vídeo': 'Video',
+    'Foto': 'Photo',
+    'Quitar {name}': 'Remove {name}',
+    'Enviar {n} archivo a Vitri': 'Send {n} file to Vitri',
+    'Enviar {n} archivos a Vitri': 'Send {n} files to Vitri',
+    'Enviar a Vitri': 'Send to Vitri',
+    'Listo para enviar': 'Ready to send',
+    'Puedes volver a Drive para añadir más antes de enviar.': 'You can go back to Drive to add more before sending.',
+    'Elige fotos y vídeos para Vitri': 'Choose photos and videos for Vitri',
+    'No se ha podido iniciar sesión en Google ({err}).': 'Couldn\'t sign in to Google ({err}).',
+    'No se ha podido abrir el inicio de sesión de Google. Permite las ventanas emergentes para esta página.': 'Couldn\'t open Google sign-in. Allow pop-ups for this page.',
+    'Abre esta página desde el botón «Drive» del panel de Vitri.': 'Open this page from the “Drive” button in the Vitri panel.',
+    'Falta configurar esta página: crea config.js con CLIENT_ID, API_KEY y APP_ID (ver README.md).': 'This page isn\'t set up: create config.js with CLIENT_ID, API_KEY and APP_ID (see README.md).',
+    'No se han podido cargar los servicios de Google. Comprueba la conexión.': 'Couldn\'t load Google services. Check the connection.',
+  },
+};
+function t(str, vars) {
+  let out = (STRINGS[LANG] && STRINGS[LANG][str]) || str;
+  if (vars) out = out.replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? vars[k] : m));
+  return out;
+}
+// Textos fijos de la página.
+document.documentElement.lang = LANG;
+{
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const key = node.nodeValue.trim();
+    if (key && STRINGS[LANG] && STRINGS[LANG][key]) node.nodeValue = node.nodeValue.replace(key, STRINGS[LANG][key]);
+  }
+}
+
 /**
  * El permiso solo se entrega al panel de Vitri en la red local: http(s) a una IP privada o localhost.
  * Así un enlace malicioso con otro "origin" no puede llevarse el permiso.
@@ -128,10 +203,10 @@ function deliver(payload) {
     window.close();
     // Algunos navegadores no dejan cerrar la ventana: se avisa claramente en vez de dejarla muda.
     setTimeout(() => {
-      $('title').textContent = payload.cancelled ? 'Cancelado' : 'Enviado a Vitri';
+      $('title').textContent = t(payload.cancelled ? 'Cancelado' : 'Enviado a Vitri');
       $('msg').hidden = true;
-      $('sentMsg').textContent = payload.cancelled ? 'No se ha importado nada.' :
-        `✓ ${payload.files.length} ${payload.files.length === 1 ? 'archivo enviado' : 'archivos enviados'}`;
+      $('sentMsg').textContent = payload.cancelled ? t('No se ha importado nada.') :
+        t(payload.files.length === 1 ? '✓ {n} archivo enviado' : '✓ {n} archivos enviados', { n: payload.files.length });
       show('sent');
     }, 300);
     return;
@@ -149,20 +224,20 @@ function renderBasket() {
     name.textContent = f.name;
     const kind = document.createElement('span');
     kind.className = 'kind';
-    kind.textContent = f.mimeType.startsWith('video') ? 'Vídeo' : 'Foto';
+    kind.textContent = t(f.mimeType.startsWith('video') ? 'Vídeo' : 'Foto');
     const rm = document.createElement('button');
     rm.className = 'rm';
     rm.textContent = '✕';
-    rm.setAttribute('aria-label', 'Quitar ' + f.name);
+    rm.setAttribute('aria-label', t('Quitar {name}', { name: f.name }));
     rm.onclick = () => { basket.delete(f.id); renderBasket(); };
     li.append(name, kind, rm);
     ul.append(li);
   }
   const n = basket.size;
-  $('sendBtn').textContent = n ? `Enviar ${n} ${n === 1 ? 'archivo' : 'archivos'} a Vitri` : 'Enviar a Vitri';
+  $('sendBtn').textContent = n ? t(n === 1 ? 'Enviar {n} archivo a Vitri' : 'Enviar {n} archivos a Vitri', { n }) : t('Enviar a Vitri');
   $('sendBtn').disabled = n === 0;
-  $('title').textContent = n ? 'Listo para enviar' : 'Importar desde Google Drive';
-  $('msg').textContent = n ? 'Puedes volver a Drive para añadir más antes de enviar.' : 'Elige las fotos y vídeos que quieras llevar a la pantalla.';
+  $('title').textContent = t(n ? 'Listo para enviar' : 'Importar desde Google Drive');
+  $('msg').textContent = t(n ? 'Puedes volver a Drive para añadir más antes de enviar.' : 'Elige las fotos y vídeos que quieras llevar a la pantalla.');
   show(n ? 'review' : 'start');
 }
 
@@ -177,8 +252,8 @@ function showPicker() {
     .setAppId(CONFIG.APP_ID)
     .setDeveloperKey(CONFIG.API_KEY)
     .setOAuthToken(accessToken)
-    .setLocale('es')
-    .setTitle('Elige fotos y vídeos para Vitri')
+    .setLocale(LANG)
+    .setTitle(t('Elige fotos y vídeos para Vitri'))
     .addView(view)
     .addView(shared)
     .addView(drives)
@@ -222,13 +297,13 @@ function onGisLoaded() {
     client_id: CONFIG.CLIENT_ID,
     scope: SCOPE,
     callback: resp => {
-      if (resp.error) { fail('No se ha podido iniciar sesión en Google (' + resp.error + ').'); return; }
+      if (resp.error) { fail(t('No se ha podido iniciar sesión en Google ({err}).', { err: resp.error })); return; }
       accessToken = resp.access_token;
       showPicker();
     },
     error_callback: err => {
       if (err && err.type === 'popup_closed') return;
-      fail('No se ha podido abrir el inicio de sesión de Google. Permite las ventanas emergentes para esta página.');
+      fail(t('No se ha podido abrir el inicio de sesión de Google. Permite las ventanas emergentes para esta página.'));
     },
   });
   $('pickBtn').disabled = !pickerReady;
@@ -239,17 +314,17 @@ function onGapiLoaded() {
 }
 
 if (!isLocalOrigin(target)) {
-  $('msg').textContent = 'Abre esta página desde el botón «Drive» del panel de Vitri.';
+  $('msg').textContent = t('Abre esta página desde el botón «Drive» del panel de Vitri.');
   $('start').hidden = true;
 } else if (!CONFIG.CLIENT_ID || !CONFIG.API_KEY || !CONFIG.APP_ID) {
-  fail('Falta configurar esta página: crea config.js con CLIENT_ID, API_KEY y APP_ID (ver README.md).');
+  fail(t('Falta configurar esta página: crea config.js con CLIENT_ID, API_KEY y APP_ID (ver README.md).'));
 } else {
   for (const [src, onload] of [['https://accounts.google.com/gsi/client', onGisLoaded], ['https://apis.google.com/js/api.js', onGapiLoaded]]) {
     const s = document.createElement('script');
     s.src = src;
     s.async = true;
     s.onload = onload;
-    s.onerror = () => fail('No se han podido cargar los servicios de Google. Comprueba la conexión.');
+    s.onerror = () => fail(t('No se han podido cargar los servicios de Google. Comprueba la conexión.'));
     document.head.append(s);
   }
 }
